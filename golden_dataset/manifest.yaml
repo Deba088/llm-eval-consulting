@@ -1,0 +1,15 @@
+case-studies:
+  - id: q001
+    case_name: Sample Case
+    difficulty: easy
+    context:
+      - type: text
+        text: sample context
+      - type: text
+        text: Additional information
+    question1:
+      - type: text
+        text: sample question
+    answer1:
+      - type: text
+        text: sample answer

@@ -1,0 +1,19 @@
+# Private eval data (not pushed for now)
+golden_dataset/
+prompts/
+
+# Generated output
+.cache/
+*.xlsx
+~$*
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+.env
+
+# IDE
+.idea/
+.vscode/
