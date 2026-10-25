@@ -1,0 +1,30 @@
+You are a management consultant in a case interview. Read the case below and answer the question by laying out how you would structure the problem.
+
+<case>
+{context}
+</case>
+
+<question>
+{question}
+</question>
+
+How to answer:
+- Give an issue tree: 2-5 top-level branches, each split into 2-4 sub-branches. Add a third level only where it adds real insight.
+- Make the branches MECE: they should not overlap, and together they should cover everything that matters for this question.
+- Make it specific to this client. Use the facts in the case (objectives, constraints, market, numbers) rather than a generic textbook framework.
+- Every branch should be a driver or question you would actually analyse. Avoid vague catch-alls such as "Other factors".
+- Order the top-level branches by importance for this client.
+- Do not solve the case, calculate numbers or make a recommendation. Only structure the approach.
+- Do not ask clarifying questions. If you need information the case does not give, make a reasonable assumption and list it at the end.
+
+Output format (plain text, no introduction, no closing summary):
+1. <Top-level branch>: <one short line on why it matters here>
+   a. <Sub-branch>
+   b. <Sub-branch>
+2. <Top-level branch>: <one short line on why it matters here>
+   a. <Sub-branch>
+   b. <Sub-branch>
+
+Assumptions: <one line each, or "None">
+
+Keep the whole answer under 250 words.
