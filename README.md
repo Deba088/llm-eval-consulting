@@ -48,7 +48,7 @@ On macOS/Linux, activate with `source venv/bin/activate`.
 ```yaml
 case-studies:
   - id: q001
-    case_name: Fit Pro
+    case_name: Sample Case
     difficulty: easy            # easy | medium | hard
     context:
       - type: text
