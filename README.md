@@ -14,7 +14,9 @@ llm-eval-consulting/
 │   ├── config.yaml            # Candidate models, judge models and run settings
 │   ├── run_eval.py            # Command line entry point: dataset, candidate and judge runs
 │   ├── llm.py                 # LangChain: model clients, prompt chains, judge output schema, pricing
-│   └── results.py             # Saved results (results/*.jsonl) and the Excel report
+│   ├── results.py             # Saved results (results/*.jsonl) and the Excel report
+│   └── site.py                # Builds the results website (python -m eval.site)
+├── docs/                      # Generated results website, served by GitHub Pages
 ├── dataset_stats.py           # Size of context / question / answer per case (chars, words, tokens)
 ├── model_benchmarks.py        # Public benchmark scores, pricing and speed per model -> Excel
 ├── requirements.txt
@@ -176,6 +178,51 @@ After the second command, the Excel file has results for q001, q002 and q003.
 - OpenAI reasoning models only accept their default temperature, so `temperature` is `null` for the judges.
 - Set `runs_per_case` above 1 in `eval/config.yaml` for more reliable averages; each run is a separate API call.
 - `results/` is in `.gitignore`.
+
+### eval/site.py: results website (GitHub Pages)
+
+Builds `docs/index.html`, a single static page with all data embedded. Charts come from Chart.js on a CDN. It shows:
+
+| Section | Contents |
+|---|---|
+| Overview | Number of models, questions, answers and judgements; average score; judge MAD |
+| Model leaderboard | Average score per dimension for each model, plus words, latency and cost (sortable) |
+| Scores by dimension | Bar chart of each model across the six dimensions |
+| How the judges differ | Average score each judge gives per model and per dimension, plus agreement per dimension (MAD, exact match, within 1 point) |
+| Scores per question | Question x model heatmap of average scores |
+| Judge disagreement per question | Question x model heatmap of how far apart the judges are |
+| Every judgement | Filterable table of every score (by case ID, model and judge) |
+
+A difficulty filter at the top applies to the whole page, and there's a light/dark toggle.
+
+**Update the site after each eval run:**
+
+```bash
+python -m eval.run_eval
+```
+
+```bash
+python -m eval.site
+```
+
+```bash
+git add docs/
+```
+
+```bash
+git commit -m "Update eval results site"
+```
+
+```bash
+git push
+```
+
+**Turn on GitHub Pages (once):** in the repository on GitHub, go to **Settings → Pages**. Under **Build and deployment**, choose **Deploy from a branch**, pick the branch you push to (e.g. `main`) and the **/docs** folder, then **Save**. The site appears at `https://<your-username>.github.io/<repo-name>/` a minute or two after each push.
+
+**Privacy:**
+- **The site is public.** GitHub Pages sites are public, even from a private repository on most GitHub plans.
+- **No dataset content, ever.** The page shows numbers only: scores, key-point counts, words, latency and cost. Cases appear only by ID (e.g. `q001`) and difficulty.
+- **What's left out:** case names, case text, questions, golden answers, model answers, judge reasoning and key-point text are never included. There is no option to add them.
 
 ### dataset_stats.py: dataset size
 

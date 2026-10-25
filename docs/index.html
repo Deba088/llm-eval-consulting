@@ -1,0 +1,342 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LLM Eval: Consulting Case Structuring</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<style>
+  :root {
+    --bg: #F6F4EF; --surface: #FFFFFF; --ink: #14213D; --muted: #5B6680; --line: #E2DED5;
+    --accent: #0F766E; --accent-rgb: 15,118,110; --warn: #B45309; --warn-rgb: 180,83,9;
+    --series-1: #0F766E; --series-2: #2563EB; --series-3: #B45309; --series-4: #7C3AED;
+    --series-5: #DB2777; --series-6: #4D7C0F;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #0F1424; --surface: #171E33; --ink: #E7EBF3; --muted: #9AA5BD; --line: #2A3350;
+      --accent: #2DD4BF; --accent-rgb: 45,212,191; --warn: #F59E0B; --warn-rgb: 245,158,11;
+      --series-1: #2DD4BF; --series-2: #60A5FA; --series-3: #F59E0B; --series-4: #A78BFA;
+      --series-5: #F472B6; --series-6: #A3E635;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #0F1424; --surface: #171E33; --ink: #E7EBF3; --muted: #9AA5BD; --line: #2A3350;
+    --accent: #2DD4BF; --accent-rgb: 45,212,191; --warn: #F59E0B; --warn-rgb: 245,158,11;
+    --series-1: #2DD4BF; --series-2: #60A5FA; --series-3: #F59E0B; --series-4: #A78BFA;
+    --series-5: #F472B6; --series-6: #A3E635;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink);
+         font: 15px/1.5 "Segoe UI", system-ui, -apple-system, "Helvetica Neue", Arial, sans-serif; }
+  .wrap { max-width: 1200px; margin: 0 auto; padding: 28px 16px 60px; }
+  header { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: flex-end; gap: 12px; margin-bottom: 20px; }
+  h1 { font-size: 28px; margin: 0 0 4px; letter-spacing: -.01em; }
+  h2 { font-size: 20px; margin: 0 0 4px; }
+  .sub { color: var(--muted); margin: 0; }
+  .controls { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+  select, button { font: inherit; color: var(--ink); background: var(--surface); border: 1px solid var(--line);
+                   border-radius: 8px; padding: 6px 10px; }
+  button { cursor: pointer; }
+  section { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 20px; margin-bottom: 18px; }
+  .hint { color: var(--muted); font-size: 13.5px; margin: 0 0 14px; }
+  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-bottom: 18px; }
+  .tile { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; }
+  .tile b { display: block; font-size: 26px; color: var(--accent); line-height: 1.1; }
+  .tile span { color: var(--muted); font-size: 13px; }
+  .grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: 18px; }
+  .chart { position: relative; height: 320px; }
+  .scroll { overflow-x: auto; }
+  table { border-collapse: collapse; width: 100%; font-size: 14px; }
+  th, td { padding: 8px 10px; border-bottom: 1px solid var(--line); text-align: left; white-space: nowrap; }
+  th { font-size: 12px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); cursor: pointer; user-select: none; }
+  td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+  td.heat { text-align: center; font-variant-numeric: tabular-nums; min-width: 72px; }
+  .empty { color: var(--muted); padding: 20px 0; }
+  footer { color: var(--muted); font-size: 13px; text-align: center; margin-top: 24px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div>
+      <h1>LLM Eval: Consulting Case Structuring</h1>
+      <p class="sub" id="meta"></p>
+    </div>
+    <div class="controls">
+      <label>Difficulty <select id="difficulty"></select></label>
+      <button id="theme" type="button" title="Toggle light/dark">Theme</button>
+    </div>
+  </header>
+
+  <div class="tiles" id="tiles"></div>
+
+  <section>
+    <h2>Model leaderboard</h2>
+    <p class="hint">Average score (1–5) per dimension over all questions, runs and judges. Click a column to sort.</p>
+    <div class="scroll"><table id="leaderboard"></table></div>
+  </section>
+
+  <section>
+    <h2>Scores by dimension</h2>
+    <p class="hint">Where each model is strong or weak.</p>
+    <div class="chart"><canvas id="dimChart"></canvas></div>
+  </section>
+
+  <section>
+    <h2>How the judges differ</h2>
+    <p class="hint">Mean absolute difference (MAD) is the average gap between two judges' scores for the same answer. 0 means they always agree.</p>
+    <div class="grid2">
+      <div><h3 class="sub">Average score given, per model</h3><div class="chart"><canvas id="judgeModelChart"></canvas></div></div>
+      <div><h3 class="sub">Average score given, per dimension</h3><div class="chart"><canvas id="judgeDimChart"></canvas></div></div>
+    </div>
+    <div class="scroll" style="margin-top:16px"><table id="agreement"></table></div>
+  </section>
+
+  <section>
+    <h2>Scores per question</h2>
+    <p class="hint">Average score over all dimensions and judges for each question and model. Darker means higher, relative to the lowest and highest value in the table.</p>
+    <div class="scroll"><table id="heatScores"></table></div>
+  </section>
+
+  <section>
+    <h2>Judge disagreement per question</h2>
+    <p class="hint">Mean absolute difference between judges for each question and model, averaged over dimensions. Darker means the judges disagree more, relative to the rest of the table.</p>
+    <div class="scroll"><table id="heatMad"></table></div>
+  </section>
+
+  <section>
+    <h2>Every judgement</h2>
+    <p class="hint">Each judge's scores for each answer. Cases are shown by ID only; no case content is published.</p>
+    <div class="controls" style="margin-bottom:12px">
+      <label>Question <select id="fItem"></select></label>
+      <label>Model <select id="fModel"></select></label>
+      <label>Judge <select id="fJudge"></select></label>
+    </div>
+    <div class="scroll"><table id="explorer"></table></div>
+  </section>
+
+  <footer>Generated by <code>python -m eval.site</code> from the saved eval results.</footer>
+</div>
+
+<script id="eval-data" type="application/json">{"generatedAt": "2026-10-25 21:48", "dimensions": [{"id": "coverage", "label": "Coverage"}, {"id": "mece", "label": "MECE"}, {"id": "client_specificity", "label": "Client specificity"}, {"id": "depth_and_insight", "label": "Depth & insight"}, {"id": "prioritisation_and_flow", "label": "Prioritisation"}, {"id": "instruction_following", "label": "Instruction following"}], "models": ["gpt-5.6-terra", "gpt-6-sol", "gpt-5.6-luna"], "judges": ["gpt-6.1-sol", "gpt-6-luna"], "items": [{"key": "q001|question1", "caseId": "q001", "difficulty": "easy", "question": "question1"}, {"key": "q002|question1", "caseId": "q002", "difficulty": "easy", "question": "question1"}, {"key": "q003|question1", "caseId": "q003", "difficulty": "easy", "question": "question1"}, {"key": "q004|question1", "caseId": "q004", "difficulty": "easy", "question": "question1"}, {"key": "q005|question1", "caseId": "q005", "difficulty": "easy", "question": "question1"}, {"key": "q006|question1", "caseId": "q006", "difficulty": "medium", "question": "question1"}, {"key": "q007|question1", "caseId": "q007", "difficulty": "medium", "question": "question1"}, {"key": "q008|question1", "caseId": "q008", "difficulty": "medium", "question": "question1"}, {"key": "q009|question1", "caseId": "q009", "difficulty": "medium", "question": "question1"}, {"key": "q010|question1", "caseId": "q010", "difficulty": "medium", "question": "question1"}], "answers": [{"key": "q001|question1|gpt-5.6-luna|1", "item": "q001|question1", "model": "gpt-5.6-luna", "run": 1, "words": 252, "latency": 16.92, "cost": 0.001136, "promptTokens": 506, "completionTokens": 862}, {"key": "q001|question1|gpt-5.6-terra|1", "item": "q001|question1", "model": "gpt-5.6-terra", "run": 1, "words": 267, "latency": 10.1, "cost": 0.00934, "promptTokens": 506, "completionTokens": 694}, {"key": "q001|question1|gpt-6-sol|1", "item": "q001|question1", "model": "gpt-6-sol", "run": 1, "words": 235, "latency": 10.98, "cost": 0.007182, "promptTokens": 506, "completionTokens": 617}, {"key": "q002|question1|gpt-5.6-luna|1", "item": "q002|question1", "model": "gpt-5.6-luna", "run": 1, "words": 237, "latency": 11.68, "cost": 0.001145, "promptTokens": 479, "completionTokens": 874}, {"key": "q002|question1|gpt-5.6-terra|1", "item": "q002|question1", "model": "gpt-5.6-terra", "run": 1, "words": 285, "latency": 10.59, "cost": 0.011026, "promptTokens": 479, "completionTokens": 839}, {"key": "q002|question1|gpt-6-sol|1", "item": "q002|question1", "model": "gpt-6-sol", "run": 1, "words": 223, "latency": 10.39, "cost": 0.008028, "promptTokens": 479, "completionTokens": 707}, {"key": "q003|question1|gpt-5.6-luna|1", "item": "q003|question1", "model": "gpt-5.6-luna", "run": 1, "words": 228, "latency": 10.92, "cost": 0.001149, "promptTokens": 560, "completionTokens": 864}, {"key": "q003|question1|gpt-5.6-terra|1", "item": "q003|question1", "model": "gpt-5.6-terra", "run": 1, "words": 235, "latency": 17.86, "cost": 0.01774, "promptTokens": 560, "completionTokens": 1385}, {"key": "q003|question1|gpt-6-sol|1", "item": "q003|question1", "model": "gpt-6-sol", "run": 1, "words": 179, "latency": 14.02, "cost": 0.01162, "promptTokens": 560, "completionTokens": 1050}, {"key": "q004|question1|gpt-5.6-luna|1", "item": "q004|question1", "model": "gpt-5.6-luna", "run": 1, "words": 219, "latency": 11.59, "cost": 0.001058, "promptTokens": 560, "completionTokens": 788}, {"key": "q004|question1|gpt-5.6-terra|1", "item": "q004|question1", "model": "gpt-5.6-terra", "run": 1, "words": 309, "latency": 8.02, "cost": 0.006724, "promptTokens": 560, "completionTokens": 467}, {"key": "q004|question1|gpt-6-sol|1", "item": "q004|question1", "model": "gpt-6-sol", "run": 1, "words": 252, "latency": 12.13, "cost": 0.00892, "promptTokens": 560, "completionTokens": 780}, {"key": "q005|question1|gpt-5.6-luna|1", "item": "q005|question1", "model": "gpt-5.6-luna", "run": 1, "words": 265, "latency": 10.8, "cost": 0.001209, "promptTokens": 964, "completionTokens": 847}, {"key": "q005|question1|gpt-5.6-terra|1", "item": "q005|question1", "model": "gpt-5.6-terra", "run": 1, "words": 284, "latency": 7.97, "cost": 0.010028, "promptTokens": 964, "completionTokens": 675}, {"key": "q005|question1|gpt-6-sol|1", "item": "q005|question1", "model": "gpt-6-sol", "run": 1, "words": 254, "latency": 8.95, "cost": 0.007388, "promptTokens": 964, "completionTokens": 546}, {"key": "q006|question1|gpt-5.6-luna|1", "item": "q006|question1", "model": "gpt-5.6-luna", "run": 1, "words": 245, "latency": 11.02, "cost": 0.001165, "promptTokens": 585, "completionTokens": 873}, {"key": "q006|question1|gpt-5.6-terra|1", "item": "q006|question1", "model": "gpt-5.6-terra", "run": 1, "words": 365, "latency": 7.84, "cost": 0.008046, "promptTokens": 585, "completionTokens": 573}, {"key": "q006|question1|gpt-6-sol|1", "item": "q006|question1", "model": "gpt-6-sol", "run": 1, "words": 196, "latency": 9.81, "cost": 0.00841, "promptTokens": 585, "completionTokens": 724}, {"key": "q007|question1|gpt-5.6-luna|1", "item": "q007|question1", "model": "gpt-5.6-luna", "run": 1, "words": 253, "latency": 10.47, "cost": 0.001077, "promptTokens": 483, "completionTokens": 817}, {"key": "q007|question1|gpt-5.6-terra|1", "item": "q007|question1", "model": "gpt-5.6-terra", "run": 1, "words": 327, "latency": 6.11, "cost": 0.006942, "promptTokens": 483, "completionTokens": 498}, {"key": "q007|question1|gpt-6-sol|1", "item": "q007|question1", "model": "gpt-6-sol", "run": 1, "words": 245, "latency": 8.93, "cost": 0.007516, "promptTokens": 483, "completionTokens": 655}, {"key": "q008|question1|gpt-5.6-luna|1", "item": "q008|question1", "model": "gpt-5.6-luna", "run": 1, "words": 264, "latency": 10.11, "cost": 0.001102, "promptTokens": 720, "completionTokens": 798}, {"key": "q008|question1|gpt-5.6-terra|1", "item": "q008|question1", "model": "gpt-5.6-terra", "run": 1, "words": 314, "latency": 5.88, "cost": 0.007056, "promptTokens": 720, "completionTokens": 468}, {"key": "q008|question1|gpt-6-sol|1", "item": "q008|question1", "model": "gpt-6-sol", "run": 1, "words": 227, "latency": 8.29, "cost": 0.00754, "promptTokens": 720, "completionTokens": 610}, {"key": "q009|question1|gpt-5.6-luna|1", "item": "q009|question1", "model": "gpt-5.6-luna", "run": 1, "words": 253, "latency": 11.3, "cost": 0.001211, "promptTokens": 659, "completionTokens": 899}, {"key": "q009|question1|gpt-5.6-terra|1", "item": "q009|question1", "model": "gpt-5.6-terra", "run": 1, "words": 302, "latency": 11.54, "cost": 0.012226, "promptTokens": 659, "completionTokens": 909}, {"key": "q009|question1|gpt-6-sol|1", "item": "q009|question1", "model": "gpt-6-sol", "run": 1, "words": 248, "latency": 7.78, "cost": 0.008168, "promptTokens": 659, "completionTokens": 685}, {"key": "q010|question1|gpt-5.6-luna|1", "item": "q010|question1", "model": "gpt-5.6-luna", "run": 1, "words": 263, "latency": 12.42, "cost": 0.001212, "promptTokens": 461, "completionTokens": 933}, {"key": "q010|question1|gpt-5.6-terra|1", "item": "q010|question1", "model": "gpt-5.6-terra", "run": 1, "words": 264, "latency": 11.41, "cost": 0.012034, "promptTokens": 461, "completionTokens": 926}, {"key": "q010|question1|gpt-6-sol|1", "item": "q010|question1", "model": "gpt-6-sol", "run": 1, "words": 247, "latency": 9.59, "cost": 0.008832, "promptTokens": 461, "completionTokens": 791}], "judgements": [{"answer": "q001|question1|gpt-5.6-luna|1", "judge": "gpt-6-luna", "cost": 0.001062, "scores": [4, 4, 5, 5, 4, 5], "keyPoints": {"full": 8, "partial": 4, "none": 2}}, {"answer": "q001|question1|gpt-5.6-luna|1", "judge": "gpt-6.1-sol", "cost": 0.020098, "scores": [4, 4, 5, 5, 5, 5], "keyPoints": {"full": 10, "partial": 2, "none": 2}}, {"answer": "q001|question1|gpt-5.6-terra|1", "judge": "gpt-6-luna", "cost": 0.001086, "scores": [4, 4, 5, 5, 5, 5], "keyPoints": {"full": 7, "partial": 4, "none": 2}}, {"answer": "q001|question1|gpt-5.6-terra|1", "judge": "gpt-6.1-sol", "cost": 0.01693, "scores": [4, 5, 5, 5, 5, 3], "keyPoints": {"full": 10, "partial": 3, "none": 1}}, {"answer": "q001|question1|gpt-6-sol|1", "judge": "gpt-6-luna", "cost": 0.001233, "scores": [4, 4, 5, 4, 5, 5], "keyPoints": {"full": 6, "partial": 7, "none": 1}}, {"answer": "q001|question1|gpt-6-sol|1", "judge": "gpt-6.1-sol", "cost": 0.021908, "scores": [4, 5, 5, 5, 5, 5], "keyPoints": {"full": 9, "partial": 4, "none": 1}}, {"answer": "q002|question1|gpt-5.6-luna|1", "judge": "gpt-6-luna", "cost": 0.00081, "scores": [4, 4, 5, 5, 5, 5], "keyPoints": {"full": 6, "partial": 4, "none": 1}}, {"answer": "q002|question1|gpt-5.6-luna|1", "judge": "gpt-6.1-sol", "cost": 0.01963, "scores": [3, 3, 5, 5, 5, 5], "keyPoints": {"full": 5, "partial": 4, "none": 2}}, {"answer": "q002|question1|gpt-5.6-terra|1", "judge": "gpt-6-luna", "cost": 0.001046, "scores": [4, 4, 5, 5, 5, 4], "keyPoints": {"full": 7, "partial": 3, "none": 1}}, {"answer": "q002|question1|gpt-5.6-terra|1", "judge": "gpt-6.1-sol", "cost": 0.012932, "scores": [4, 3, 4, 5, 5, 3], "keyPoints": {"full": 7, "partial": 3, "none": 1}}, {"answer": "q002|question1|gpt-6-sol|1", "judge": "gpt-6-luna", "cost": 0.001007, "scores": [4, 4, 5, 5, 5, 5], "keyPoints": {"full": 7, "partial": 3, "none": 1}}, {"answer": "q002|question1|gpt-6-sol|1", "judge": "gpt-6.1-sol", "cost": 0.017604, "scores": [4, 4, 5, 5, 5, 5], "keyPoints": {"full": 8, "partial": 2, "none": 1}}, {"answer": "q003|question1|gpt-5.6-luna|1", "judge": "gpt-6-luna", "cost": 0.000867, "scores": [4, 3, 5, 5, 4, 5], "keyPoints": {"full": 7, "partial": 2, "none": 0}}, {"answer": "q003|question1|gpt-5.6-luna|1", "judge": "gpt-6.1-sol", "cost": 0.018216, "scores": [4, 3, 5, 5, 5, 5], "keyPoints": {"full": 8, "partial": 1, "none": 0}}, {"answer": "q003|question1|gpt-5.6-terra|1", "judge": "gpt-6-luna", "cost": 0.000749, "scores": [4, 3, 5, 5, 4, 4], "keyPoints": {"full": 7, "partial": 2, "none": 0}}, {"answer": "q003|question1|gpt-5.6-terra|1", "judge": "gpt-6.1-sol", "cost": 0.016802, "scores": [4, 3, 5, 5, 5, 5], "keyPoints": {"full": 8, "partial": 0, "none": 1}}, {"answer": "q003|question1|gpt-6-sol|1", "judge": "gpt-6-luna", "cost": 0.001096, "scores": [4, 4, 5, 5, 4, 5], "keyPoints": {"full": 7, "partial": 2, "none": 0}}, {"answer": "q003|question1|gpt-6-sol|1", "judge": "gpt-6.1-sol", "cost": 0.01111, "scores": [4, 4, 5, 5, 5, 5], "keyPoints": {"full": 8, "partial": 0, "none": 1}}, {"answer": "q004|question1|gpt-5.6-luna|1", "judge": "gpt-6-luna", "cost": 0.001083, "scores": [4, 4, 5, 5, 5, 5], "keyPoints": {"full": 10, "partial": 6, "none": 2}}, {"answer": "q004|question1|gpt-5.6-luna|1", "judge": "gpt-6.1-sol", "cost": 0.020686, "scores": [4, 4, 5, 5, 5, 5], "keyPoints": {"full": 10, "partial": 6, "none": 2}}, {"answer": "q004|question1|gpt-5.6-terra|1", "judge": "gpt-6-luna", "cost": 0.001399, "scores": [4, 4, 5, 5, 4, 5], "keyPoints": {"full": 7, "partial": 9, "none": 2}}, {"answer": "q004|question1|gpt-5.6-terra|1", "judge": "gpt-6.1-sol", "cost": 0.01529, "scores": [4, 4, 5, 5, 5, 3], "keyPoints": {"full": 10, "partial": 5, "none": 3}}, {"answer": "q004|question1|gpt-6-sol|1", "judge": "gpt-6-luna", "cost": 0.001271, "scores": [4, 4, 5, 5, 5, 5], "keyPoints": {"full": 5, "partial": 13, "none": 0}}, {"answer": "q004|question1|gpt-6-sol|1", "judge": "gpt-6.1-sol", "cost": 0.020742, "scores": [4, 4, 5, 5, 5, 5], "keyPoints": {"full": 8, "partial": 8, "none": 2}}, {"answer": "q005|question1|gpt-5.6-luna|1", "judge": "gpt-6-luna", "cost": 0.000991, "scores": [4, 4, 5, 5, 5, 5], "keyPoints": {"full": 8, "partial": 1, "none": 1}}, {"answer": "q005|question1|gpt-5.6-luna|1", "judge": "gpt-6.1-sol", "cost": 0.014928, "scores": [4, 4, 5, 5, 5, 3], "keyPoints": {"full": 9, "partial": 2, "none": 1}}, {"answer": "q005|question1|gpt-5.6-terra|1", "judge": "gpt-6-luna", "cost": 0.001541, "scores": [4, 3, 5, 5, 5, 3], "keyPoints": {"full": 10, "partial": 3, "none": 0}}, {"answer": "q005|question1|gpt-5.6-terra|1", "judge": "gpt-6.1-sol", "cost": 0.014726, "scores": [4, 4, 5, 5, 5, 3], "keyPoints": {"full": 10, "partial": 1, "none": 1}}, {"answer": "q005|question1|gpt-6-sol|1", "judge": "gpt-6-luna", "cost": 0.001267, "scores": [4, 4, 5, 4, 5, 5], "keyPoints": {"full": 7, "partial": 4, "none": 1}}, {"answer": "q005|question1|gpt-6-sol|1", "judge": "gpt-6.1-sol", "cost": 0.020378, "scores": [4, 5, 5, 5, 5, 5], "keyPoints": {"full": 8, "partial": 2, "none": 2}}, {"answer": "q006|question1|gpt-5.6-luna|1", "judge": "gpt-6-luna", "cost": 0.00147, "scores": [3, 3, 4, 4, 4, 5], "keyPoints": {"full": 7, "partial": 11, "none": 3}}, {"answer": "q006|question1|gpt-5.6-luna|1", "judge": "gpt-6.1-sol", "cost": 0.02255, "scores": [3, 3, 5, 5, 4, 5], "keyPoints": {"full": 7, "partial": 6, "none": 8}}, {"answer": "q006|question1|gpt-5.6-terra|1", "judge": "gpt-6-luna", "cost": 0.001206, "scores": [4, 4, 5, 5, 4, 3], "keyPoints": {"full": 7, "partial": 5, "none": 6}}, {"answer": "q006|question1|gpt-5.6-terra|1", "judge": "gpt-6.1-sol", "cost": 0.018236, "scores": [3, 3, 5, 5, 4, 3], "keyPoints": {"full": 11, "partial": 1, "none": 9}}, {"answer": "q006|question1|gpt-6-sol|1", "judge": "gpt-6-luna", "cost": 0.001101, "scores": [3, 4, 5, 4, 4, 5], "keyPoints": {"full": 5, "partial": 5, "none": 11}}, {"answer": "q006|question1|gpt-6-sol|1", "judge": "gpt-6.1-sol", "cost": 0.014794, "scores": [4, 4, 5, 4, 5, 5], "keyPoints": {"full": 4, "partial": 2, "none": 1}}, {"answer": "q007|question1|gpt-5.6-luna|1", "judge": "gpt-6-luna", "cost": 0.000762, "scores": [4, 4, 5, 5, 5, 5], "keyPoints": {"full": 7, "partial": 1, "none": 0}}, {"answer": "q007|question1|gpt-5.6-luna|1", "judge": "gpt-6.1-sol", "cost": 0.018898, "scores": [5, 4, 5, 5, 5, 5], "keyPoints": {"full": 7, "partial": 1, "none": 0}}, {"answer": "q007|question1|gpt-5.6-terra|1", "judge": "gpt-6-luna", "cost": 0.001374, "scores": [4, 4, 5, 5, 5, 3], "keyPoints": {"full": 9, "partial": 6, "none": 1}}, {"answer": "q007|question1|gpt-5.6-terra|1", "judge": "gpt-6.1-sol", "cost": 0.01496, "scores": [4, 3, 5, 5, 5, 3], "keyPoints": {"full": 16, "partial": 1, "none": 2}}, {"answer": "q007|question1|gpt-6-sol|1", "judge": "gpt-6-luna", "cost": 0.001025, "scores": [4, 4, 5, 5, 5, 5], "keyPoints": {"full": 8, "partial": 4, "none": 3}}, {"answer": "q007|question1|gpt-6-sol|1", "judge": "gpt-6.1-sol", "cost": 0.020742, "scores": [4, 4, 5, 5, 5, 5], "keyPoints": {"full": 12, "partial": 5, "none": 2}}, {"answer": "q008|question1|gpt-5.6-luna|1", "judge": "gpt-6-luna", "cost": 0.000743, "scores": [5, 4, 5, 5, 4, 5], "keyPoints": {"full": 8, "partial": 2, "none": 0}}, {"answer": "q008|question1|gpt-5.6-luna|1", "judge": "gpt-6.1-sol", "cost": 0.01436, "scores": [5, 3, 5, 5, 5, 3], "keyPoints": {"full": 12, "partial": 1, "none": 0}}, {"answer": "q008|question1|gpt-5.6-terra|1", "judge": "gpt-6-luna", "cost": 0.000807, "scores": [4, 4, 5, 5, 5, 5], "keyPoints": {"full": 12, "partial": 1, "none": 0}}, {"answer": "q008|question1|gpt-5.6-terra|1", "judge": "gpt-6.1-sol", "cost": 0.012898, "scores": [5, 4, 5, 5, 5, 3], "keyPoints": {"full": 12, "partial": 1, "none": 0}}, {"answer": "q008|question1|gpt-6-sol|1", "judge": "gpt-6-luna", "cost": 0.000732, "scores": [4, 4, 5, 5, 5, 5], "keyPoints": {"full": 8, "partial": 2, "none": 0}}, {"answer": "q008|question1|gpt-6-sol|1", "judge": "gpt-6.1-sol", "cost": 0.01807, "scores": [4, 4, 5, 5, 5, 5], "keyPoints": {"full": 11, "partial": 2, "none": 0}}, {"answer": "q009|question1|gpt-5.6-luna|1", "judge": "gpt-6-luna", "cost": 0.001079, "scores": [4, 4, 5, 5, 5, 5], "keyPoints": {"full": 13, "partial": 6, "none": 0}}, {"answer": "q009|question1|gpt-5.6-luna|1", "judge": "gpt-6.1-sol", "cost": 0.019786, "scores": [4, 4, 5, 5, 5, 3], "keyPoints": {"full": 18, "partial": 3, "none": 7}}, {"answer": "q009|question1|gpt-5.6-terra|1", "judge": "gpt-6-luna", "cost": 0.001915, "scores": [4, 4, 5, 5, 5, 3], "keyPoints": {"full": 17, "partial": 6, "none": 4}}, {"answer": "q009|question1|gpt-5.6-terra|1", "judge": "gpt-6.1-sol", "cost": 0.018266, "scores": [4, 4, 5, 5, 5, 3], "keyPoints": {"full": 19, "partial": 5, "none": 4}}, {"answer": "q009|question1|gpt-6-sol|1", "judge": "gpt-6-luna", "cost": 0.001234, "scores": [4, 4, 5, 5, 5, 5], "keyPoints": {"full": 12, "partial": 6, "none": 2}}, {"answer": "q009|question1|gpt-6-sol|1", "judge": "gpt-6.1-sol", "cost": 0.023146, "scores": [4, 5, 5, 5, 5, 5], "keyPoints": {"full": 15, "partial": 5, "none": 8}}, {"answer": "q010|question1|gpt-5.6-luna|1", "judge": "gpt-6-luna", "cost": 0.001108, "scores": [4, 3, 5, 5, 4, 5], "keyPoints": {"full": 6, "partial": 4, "none": 3}}, {"answer": "q010|question1|gpt-5.6-luna|1", "judge": "gpt-6.1-sol", "cost": 0.01369, "scores": [3, 3, 5, 5, 4, 3], "keyPoints": {"full": 8, "partial": 2, "none": 3}}, {"answer": "q010|question1|gpt-5.6-terra|1", "judge": "gpt-6-luna", "cost": 0.001732, "scores": [4, 3, 5, 5, 4, 3], "keyPoints": {"full": 5, "partial": 5, "none": 3}}, {"answer": "q010|question1|gpt-5.6-terra|1", "judge": "gpt-6.1-sol", "cost": 0.014896, "scores": [4, 4, 5, 5, 4, 3], "keyPoints": {"full": 7, "partial": 3, "none": 3}}, {"answer": "q010|question1|gpt-6-sol|1", "judge": "gpt-6-luna", "cost": 0.001156, "scores": [4, 3, 5, 5, 4, 5], "keyPoints": {"full": 7, "partial": 4, "none": 2}}, {"answer": "q010|question1|gpt-6-sol|1", "judge": "gpt-6.1-sol", "cost": 0.019528, "scores": [4, 4, 5, 4, 4, 5], "keyPoints": {"full": 6, "partial": 5, "none": 2}}]}</script>
+<script>
+const D = JSON.parse(document.getElementById("eval-data").textContent);
+const dims = D.dimensions;
+const itemsByKey = Object.fromEntries(D.items.map(i => [i.key, i]));
+const answersByKey = Object.fromEntries(D.answers.map(a => [a.key, a]));
+const charts = {};
+let difficulty = "all";
+
+const css = name => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+const mean = xs => xs.length ? xs.reduce((s, x) => s + x, 0) / xs.length : null;
+const fmt = (x, d = 2) => x == null ? "–" : x.toFixed(d);
+const avg = xs => mean(xs.filter(x => x != null));
+const el = (tag, attrs = {}, text) => { const e = document.createElement(tag); Object.assign(e, attrs); if (text != null) e.textContent = text; return e; };
+const series = i => css(`--series-${(i % 6) + 1}`);
+const itemLabel = i => `${i.caseId}${i.question !== "question1" ? " (" + i.question.replace("question", "Q") + ")" : ""}`;
+
+function visible(j) {
+  const a = answersByKey[j.answer];
+  return a && (difficulty === "all" || itemsByKey[a.item].difficulty === difficulty);
+}
+function visibleAnswers() { return D.answers.filter(a => difficulty === "all" || itemsByKey[a.item].difficulty === difficulty); }
+function overall(j) { return mean(j.scores); }
+
+// Pairs of judgements on the same answer, for agreement stats
+function judgePairs(js) {
+  const byAnswer = {};
+  js.forEach(j => (byAnswer[j.answer] ||= []).push(j));
+  const pairs = [];
+  Object.values(byAnswer).forEach(list => {
+    for (let x = 0; x < list.length; x++) for (let y = x + 1; y < list.length; y++) pairs.push([list[x], list[y]]);
+  });
+  return pairs;
+}
+
+function renderTiles(js) {
+  const answers = visibleAnswers();
+  const pairs = judgePairs(js);
+  const diffs = pairs.flatMap(([a, b]) => a.scores.map((s, i) => Math.abs(s - b.scores[i])));
+  const tiles = [
+    [D.models.length, "models"],
+    [new Set(answers.map(a => a.item)).size, "questions"],
+    [answers.length, "answers"],
+    [js.length, "judgements"],
+    [fmt(avg(js.map(overall))), "average score (1–5)"],
+    [fmt(mean(diffs)), "judge MAD"],
+  ];
+  const box = document.getElementById("tiles");
+  box.replaceChildren(...tiles.map(([v, l]) => { const t = el("div", { className: "tile" }); t.append(el("b", {}, String(v)), el("span", {}, l)); return t; }));
+}
+
+function sortableTable(table, headers, rows, numericFrom) {
+  let sortCol = null, dir = -1;
+  function draw() {
+    const sorted = sortCol == null ? rows : [...rows].sort((a, b) => {
+      const x = a[sortCol].sort ?? a[sortCol].v, y = b[sortCol].sort ?? b[sortCol].v;
+      return (x == null) - (y == null) || (x < y ? -1 : x > y ? 1 : 0) * dir;
+    });
+    const thead = el("thead"), tr = el("tr");
+    headers.forEach((h, i) => {
+      const th = el("th", { className: i >= numericFrom ? "num" : "" }, h + (sortCol === i ? (dir < 0 ? " ▼" : " ▲") : ""));
+      th.onclick = () => { dir = sortCol === i ? -dir : -1; sortCol = i; draw(); };
+      tr.append(th);
+    });
+    thead.append(tr);
+    const tbody = el("tbody");
+    sorted.forEach(r => { const row = el("tr"); r.forEach((c, i) => row.append(el("td", { className: i >= numericFrom ? "num" : "" }, c.t ?? String(c.v ?? "–")))); tbody.append(row); });
+    table.replaceChildren(thead, tbody);
+  }
+  draw();
+}
+
+function renderLeaderboard(js) {
+  const answers = visibleAnswers();
+  const rows = D.models.map(m => {
+    const mj = js.filter(j => answersByKey[j.answer].model === m);
+    const ma = answers.filter(a => a.model === m);
+    const o = avg(mj.map(overall));
+    const per = dims.map((_, i) => avg(mj.map(j => j.scores[i])));
+    const cost = ma.reduce((s, a) => s + (a.cost || 0), 0);
+    return [{ v: m }, { v: o, t: fmt(o) }, ...per.map(v => ({ v, t: fmt(v) })),
+            { v: ma.length }, { v: avg(ma.map(a => a.words)), t: fmt(avg(ma.map(a => a.words)), 0) },
+            { v: avg(ma.map(a => a.latency)), t: fmt(avg(ma.map(a => a.latency)), 1) }, { v: cost, t: "$" + cost.toFixed(3) }];
+  });
+  sortableTable(document.getElementById("leaderboard"),
+    ["Model", "Overall", ...dims.map(d => d.label), "Answers", "Avg words", "Avg latency (s)", "Answer cost"], rows, 1);
+}
+
+function barChart(id, labels, datasets, opts = {}) {
+  charts[id]?.destroy();
+  const ink = css("--ink"), line = css("--line"), muted = css("--muted");
+  charts[id] = new Chart(document.getElementById(id), {
+    type: "bar",
+    data: { labels, datasets: datasets.map((d, i) => ({ borderRadius: 4, backgroundColor: series(i), ...d })) },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      scales: {
+        y: { min: opts.min ?? 1, max: opts.max ?? 5, ticks: { color: muted }, grid: { color: line } },
+        x: { ticks: { color: muted }, grid: { display: false } },
+      },
+      plugins: {
+        legend: { labels: { color: ink, boxWidth: 12 } },
+        tooltip: { callbacks: { label: c => `${c.dataset.label}: ${fmt(c.parsed.y)}` } },
+      },
+    },
+  });
+}
+
+function renderDimChart(js) {
+  barChart("dimChart", dims.map(d => d.label), D.models.map(m => ({
+    label: m, data: dims.map((_, i) => avg(js.filter(j => answersByKey[j.answer].model === m).map(j => j.scores[i]))),
+  })));
+}
+
+function renderJudges(js) {
+  barChart("judgeModelChart", D.models, D.judges.map(judge => ({
+    label: judge, data: D.models.map(m => avg(js.filter(j => j.judge === judge && answersByKey[j.answer].model === m).map(overall))),
+  })));
+  barChart("judgeDimChart", dims.map(d => d.label), D.judges.map(judge => ({
+    label: judge, data: dims.map((_, i) => avg(js.filter(j => j.judge === judge).map(j => j.scores[i]))),
+  })));
+
+  const pairs = judgePairs(js);
+  const rows = dims.map((d, i) => {
+    const diffs = pairs.map(([a, b]) => Math.abs(a.scores[i] - b.scores[i]));
+    const exact = diffs.length ? 100 * diffs.filter(x => x === 0).length / diffs.length : null;
+    const within = diffs.length ? 100 * diffs.filter(x => x <= 1).length / diffs.length : null;
+    return [{ v: d.label }, { v: mean(diffs), t: fmt(mean(diffs)) }, { v: exact, t: exact == null ? "–" : exact.toFixed(0) + "%" },
+            { v: within, t: within == null ? "–" : within.toFixed(0) + "%" }, { v: diffs.length }];
+  });
+  sortableTable(document.getElementById("agreement"), ["Dimension", "MAD", "Exact match", "Within 1 point", "Answer pairs"], rows, 1);
+}
+
+// Cell colour intensity runs from the lowest to the highest value in the table, so small differences stay visible
+function heatTable(tableId, cellValue, colour, digits) {
+  const table = document.getElementById(tableId);
+  const items = D.items.filter(i => difficulty === "all" || i.difficulty === difficulty);
+  const values = items.flatMap(item => D.models.map(m => cellValue(item, m))).filter(v => v != null);
+  const lo = Math.min(...values), hi = Math.max(...values);
+  const scale = v => hi > lo ? (v - lo) / (hi - lo) : 0.5;
+  const thead = el("thead"), hr = el("tr");
+  hr.append(el("th", {}, "Question"), el("th", {}, "Difficulty"), ...D.models.map(m => el("th", { className: "num" }, m)));
+  thead.append(hr);
+  const tbody = el("tbody");
+  items.forEach(item => {
+    const tr = el("tr");
+    tr.append(el("td", {}, itemLabel(item)), el("td", {}, item.difficulty));
+    D.models.forEach(m => {
+      const v = cellValue(item, m);
+      const td = el("td", { className: "heat" }, fmt(v, digits));
+      if (v != null) td.style.background = colour(scale(v));
+      tr.append(td);
+    });
+    tbody.append(tr);
+  });
+  table.replaceChildren(thead, tbody);
+}
+
+function renderHeatmaps(js) {
+  const forCell = (item, m) => js.filter(j => { const a = answersByKey[j.answer]; return a.item === item.key && a.model === m; });
+  heatTable("heatScores", (item, m) => avg(forCell(item, m).map(overall)),
+    t => `rgba(${css("--accent-rgb")}, ${0.06 + t * 0.7})`, 2);
+  heatTable("heatMad", (item, m) => {
+    const pairs = judgePairs(forCell(item, m));
+    return pairs.length ? mean(pairs.flatMap(([a, b]) => a.scores.map((s, i) => Math.abs(s - b.scores[i])))) : null;
+  }, t => `rgba(${css("--warn-rgb")}, ${0.04 + t * 0.7})`, 2);
+}
+
+function fillSelect(id, options, label) {
+  const s = document.getElementById(id), current = s.value;
+  s.replaceChildren(el("option", { value: "" }, `All ${label}`), ...options.map(([v, t]) => el("option", { value: v }, t)));
+  if (options.some(([v]) => v === current)) s.value = current;
+}
+
+function renderExplorer(js) {
+  fillSelect("fItem", D.items.filter(i => difficulty === "all" || i.difficulty === difficulty).map(i => [i.key, itemLabel(i)]), "questions");
+  fillSelect("fModel", D.models.map(m => [m, m]), "models");
+  fillSelect("fJudge", D.judges.map(j => [j, j]), "judges");
+  const fItem = document.getElementById("fItem").value, fModel = document.getElementById("fModel").value, fJudge = document.getElementById("fJudge").value;
+  const rows = js.filter(j => { const a = answersByKey[j.answer]; return (!fItem || a.item === fItem) && (!fModel || a.model === fModel) && (!fJudge || j.judge === fJudge); });
+
+  const table = document.getElementById("explorer");
+  const thead = el("thead"), hr = el("tr");
+  ["Question", "Model", "Run", "Judge", ...dims.map(d => d.label), "Avg", "Key points (full / partial / missed)"].forEach((h, i) =>
+    hr.append(el("th", { className: i >= 4 && i < 4 + dims.length + 1 ? "num" : "" }, h)));
+  thead.append(hr);
+  const tbody = el("tbody");
+  if (!rows.length) { const tr = el("tr"); tr.append(el("td", { colSpan: 12, className: "empty" }, "No judgements match these filters.")); tbody.append(tr); }
+  rows.forEach(j => {
+    const a = answersByKey[j.answer], item = itemsByKey[a.item];
+    const tr = el("tr");
+    tr.append(el("td", {}, itemLabel(item)), el("td", {}, a.model), el("td", {}, String(a.run)), el("td", {}, j.judge),
+      ...j.scores.map(s => el("td", { className: "num" }, String(s))), el("td", { className: "num" }, fmt(overall(j))),
+      el("td", {}, `${j.keyPoints.full} / ${j.keyPoints.partial} / ${j.keyPoints.none}`));
+    tbody.append(tr);
+  });
+  table.replaceChildren(thead, tbody);
+}
+
+function renderAll() {
+  const js = D.judgements.filter(visible);
+  renderTiles(js); renderLeaderboard(js); renderDimChart(js); renderJudges(js); renderHeatmaps(js); renderExplorer(js);
+}
+
+document.getElementById("meta").textContent =
+  `Generated ${D.generatedAt} · ${D.models.length} models · ${D.judges.length} judges · scores 1 (lowest) to 5 (highest)`;
+const diffSelect = document.getElementById("difficulty");
+diffSelect.replaceChildren(el("option", { value: "all" }, "All"),
+  ...[...new Set(D.items.map(i => i.difficulty))].sort().map(d => el("option", { value: d }, d)));
+diffSelect.onchange = () => { difficulty = diffSelect.value; renderAll(); };
+["fItem", "fModel", "fJudge"].forEach(id => document.getElementById(id).onchange = () => renderExplorer(D.judgements.filter(visible)));
+document.getElementById("theme").onclick = () => {
+  const root = document.documentElement;
+  const dark = root.dataset.theme ? root.dataset.theme === "dark" : matchMedia("(prefers-color-scheme: dark)").matches;
+  root.dataset.theme = dark ? "light" : "dark";
+  renderAll();
+};
+renderAll();
+</script>
+</body>
+</html>
