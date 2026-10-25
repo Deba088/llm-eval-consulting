@@ -1,0 +1,41 @@
+# Settings for: python -m eval.run_eval
+# File paths below (dataset, prompts, output_dir) are relative to the project root.
+
+# One entry per provider. Each model below names its provider.
+providers:
+  openai:
+    api_key_env: OPENAI_API_KEY     # name of the environment variable holding the key
+  google:
+    api_key_env: GOOGLE_API_KEY
+    free_tier: true                 # free-tier calls cost $0 (Google may use free-tier content to improve its products)
+
+api:
+  timeout_seconds: 300
+  max_workers: 2                    # parallel API calls; kept low for Google's free-tier rate limits
+  # Public price list used to estimate costs (no key needed). Prices are looked up as "<provider>/<model id>".
+  pricing_url: https://openrouter.ai/api/v1/models
+
+dataset: golden_dataset/manifest.yaml
+candidate_prompt: prompts/model_instruction.txt
+judge_prompt: prompts/judge_rubric.txt
+output_dir: results
+
+# How many times to ask each candidate the same question (more runs = more reliable averages)
+runs_per_case: 1
+
+candidates:
+  max_tokens: 8000                  # leave room for reasoning models' thinking tokens
+  temperature: null                 # null = provider default
+  models:
+    - {id: gpt-5.6-terra, provider: openai}   # costliest of the three: $2 in / $12 out per 1M tokens
+    - {id: gpt-6-sol, provider: openai}       # medium:  $2 / $10
+    - {id: gpt-5.6-luna, provider: openai}    # cheap:   $0.20 / $1.20
+    # - {id: gemini-3.8-flash, provider: google}   # re-enable later; needs GOOGLE_API_KEY
+
+# Every judge scores every answer. A model should not judge its own answers.
+judges:
+  max_tokens: 8000
+  temperature: null                 # OpenAI reasoning models only accept their default temperature
+  models:
+    - {id: gpt-6.1-sol, provider: openai}
+    - {id: gpt-6-luna, provider: openai}

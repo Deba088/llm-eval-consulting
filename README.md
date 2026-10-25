@@ -8,7 +8,13 @@ llm-eval-consulting/
 ├── golden_dataset/
 │   └── manifest.yaml          # Golden cases: context, question(s) and model answer(s)
 ├── prompts/
-│   └── model_instruction.txt  # User prompt sent to each model ({context} and {question} placeholders)
+│   ├── model_instruction.txt  # User prompt sent to each model ({context} and {question} placeholders)
+│   └── judge_rubric.txt       # Judge prompt: scores an answer vs. the golden answer, 1-5 on six dimensions
+├── eval/                      # Eval pipeline (run with: python -m eval.run_eval)
+│   ├── config.yaml            # Candidate models, judge models and run settings
+│   ├── run_eval.py            # Command line entry point: dataset, candidate and judge runs
+│   ├── llm.py                 # LangChain: model clients, prompt chains, judge output schema, pricing
+│   └── results.py             # Saved results (results/*.jsonl) and the Excel report
 ├── dataset_stats.py           # Size of context / question / answer per case (chars, words, tokens)
 ├── model_benchmarks.py        # Public benchmark scores, pricing and speed per model -> Excel
 ├── requirements.txt
@@ -70,6 +76,106 @@ prompt = template.format(context=context_text, question=question_text)
 where `context_text` and `question_text` are the joined `text` blocks of `context` and `questionN`.
 
 ## Scripts
+
+### eval/: evaluate models on the golden dataset
+
+For every case and every `questionN` / `answerN` pair:
+
+1. Fills `prompts/model_instruction.txt` and sends it to each candidate model.
+2. Fills `prompts/judge_rubric.txt` with the case, question, golden answer and candidate answer, and sends it to each judge model. Judges don't see which model wrote the answer.
+3. Writes `results/eval_results.xlsx`.
+
+Built with LangChain:
+
+| Piece | LangChain component |
+|---|---|
+| Model calls | `ChatOpenAI` (`langchain-openai`) for OpenAI models and `ChatGoogleGenerativeAI` (`langchain-google-genai`) for Gemini; both retry rate limits and server errors |
+| Prompts | `ChatPromptTemplate` filled from the two files in `prompts/` |
+| Judge output | `PydanticOutputParser` checks the JSON has six whole-number scores from 1 to 5 |
+| Bad judge replies | `.with_retry()` re-asks the judge up to 3 times when its reply doesn't parse |
+| Parallel calls | `batch_as_completed()` with `max_concurrency` from `eval/config.yaml` |
+
+Models are called directly at each provider. In `eval/config.yaml`, each model has an `id` and a `provider` (`openai` or `google`). The current setup:
+
+| Role | Models |
+|---|---|
+| Candidates | `gpt-5.6-terra` ($2 / $12), `gpt-6-sol` ($2 / $10), `gpt-5.6-luna` ($0.20 / $1.20) |
+| Judges | `gpt-6.1-sol`, `gpt-6-luna` |
+
+Costs are estimated from token counts and OpenRouter's public price list (no OpenRouter key needed). Models marked `free_tier` are counted as $0. Gemini is set up but commented out in `eval/config.yaml`; un-comment it and set `GOOGLE_API_KEY` (from aistudio.google.com) to add it back.
+
+1. Get an OpenAI API key at platform.openai.com.
+2. Set it in your terminal (PowerShell):
+
+   ```powershell
+   $env:OPENAI_API_KEY = "your-openai-key"
+   ```
+
+3. Check the prompts and the number of calls, without calling any API:
+
+   ```bash
+   python -m eval.run_eval --dry-run
+   ```
+
+4. Try a small run first, then the full run:
+
+   ```bash
+   python -m eval.run_eval --cases q001
+   ```
+
+   ```bash
+   python -m eval.run_eval
+   ```
+
+| Option | What it does |
+|---|---|
+| `--dry-run` | Print the filled prompts for the first question and the number of API calls a full run makes |
+| `--models a,b` | Only run candidate models whose ID contains one of these strings |
+| `--cases q001,q002` | Only run these case IDs |
+| `--rerun` | Ask the selected models the selected cases again, replacing their earlier answers and scores (e.g. after editing a case) |
+| `--rejudge` | Keep the selected answers but score them again (e.g. after editing the rubric) |
+| `--report-only` | Update the Excel file from saved results without calling any API |
+| `--config file.yaml` | Use a different settings file |
+
+**Updating the Excel file**
+
+`results/eval_results.xlsx` is created on the first run and updated in place after every later run. It always shows **all saved results**: every model and case evaluated so far, not just the ones in the latest run. For example:
+
+```bash
+python -m eval.run_eval --cases q001,q002
+```
+
+```bash
+python -m eval.run_eval --cases q003
+```
+
+After the second command, the Excel file has results for q001, q002 and q003.
+
+- **Your own sheets stay.** Sheets you add (e.g. your own weighted score) are kept, and formulas pointing at the generated sheets keep working.
+  - Refer to models by name (e.g. `XLOOKUP` on the Model column), not by fixed cell. Row order can change when models are added or removed.
+- **Only current scores count.** A score is included only if it was made by a judge currently in `eval/config.yaml`, on the latest version of the answer.
+  - If you change the judges, the old judges' scores drop out of the Excel file. They stay in `results/judgements.jsonl`.
+- **Close the file before a run.** If it's open in Excel, saving fails. The results are still saved in `results/*.jsonl`; close the file and run `python -m eval.run_eval --report-only`.
+
+**Excel sheets**
+
+| Sheet | Contents |
+|---|---|
+| Summary | One row per model: average score per dimension (over cases, runs and judges), average words, latency and cost |
+| By difficulty | The same averages split by easy / medium / hard |
+| Scores | One row per answer and judge, with key points covered / partly covered / missed, strengths and weaknesses |
+| Judge reasoning | The judge's reason for each score and its key-point checklist |
+| Answers | Every model answer with words, latency, tokens and cost |
+| Judge agreement | How often the judges give the same score (mean difference, % exact, % within 1 point) |
+
+**Notes**
+
+- Results are saved to `results/answers.jsonl` and `results/judgements.jsonl` as they arrive. Re-running skips anything already done, so an interrupted run resumes and failed calls are retried. To redo some results, use `--rerun` or `--rejudge` with `--cases` / `--models`. To start completely fresh, delete the `results/` folder.
+- A judge tends to favour answers from its own model family. Both judges are OpenAI models, so check a few Gemini scores by hand before concluding it is weaker.
+- On Google's free tier, Google may use the content you send (including the golden dataset) to improve its products. Free-tier rate limits are low, so `max_workers` is set to 2; rate-limited calls are retried automatically.
+- OpenAI reasoning models only accept their default temperature, so `temperature` is `null` for the judges.
+- Set `runs_per_case` above 1 in `eval/config.yaml` for more reliable averages; each run is a separate API call.
+- `results/` is in `.gitignore`.
 
 ### dataset_stats.py: dataset size
 

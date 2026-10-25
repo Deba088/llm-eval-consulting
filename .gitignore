@@ -4,6 +4,7 @@ prompts/
 
 # Generated output
 .cache/
+results/
 *.xlsx
 ~$*
 
